@@ -149,6 +149,12 @@ impl ZellijPlugin for Pomo {
                             self.running = false;
                             self.phase = Phase::Finished;
                         }
+                        Some("hide") => {
+                            hide_self();
+                        }
+                        Some("show") => {
+                            show_self(false);
+                        }
                         _ => {}
                     }
                 }
@@ -212,7 +218,7 @@ impl Pomo {
         let line = format!("{time}{:>width$}", help, width = padding + help.len());
         print_text_with_coordinates(
             Text::new(&line).color_range(0, 0..time.len()),
-            0, 0, Some(cols), None,
+            1, 0, Some(cols.saturating_sub(1)), None,
         );
     }
 
@@ -221,7 +227,7 @@ impl Pomo {
         let help = "r:new session";
         let padding = cols.saturating_sub(msg.len() + help.len() + 1);
         let line = format!("{msg}{:>width$}", help, width = padding + help.len());
-        print_text_with_coordinates(Text::new(&line), 0, 0, Some(cols), None);
+        print_text_with_coordinates(Text::new(&line), 1, 0, Some(cols.saturating_sub(1)), None);
     }
 
     fn render_break(&self, rows: usize, cols: usize) {
