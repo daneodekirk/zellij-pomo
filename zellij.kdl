@@ -6,6 +6,9 @@ layout {
     pane edit="src/main.rs" size="80%"
     pane
     pane size=1 borderless=true {
+        plugin location="file:target/wasm32-wasip1/debug/pomo.wasm"
+    }
+    pane size=1 borderless=true {
         plugin location="status-bar"
     }
     floating_panes {

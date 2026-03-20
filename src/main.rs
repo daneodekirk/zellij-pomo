@@ -40,8 +40,8 @@ struct Pomo {
 
 register_plugin!(Pomo);
 
-const DEFAULT_WORK_SECS: usize = 10;
-const DEFAULT_BREAK_SECS: usize = 5;
+const DEFAULT_WORK_SECS: usize = 1500;
+const DEFAULT_BREAK_SECS: usize = 300;
 
 impl ZellijPlugin for Pomo {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
@@ -61,6 +61,10 @@ impl ZellijPlugin for Pomo {
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
         ]);
+
+        // Auto-start the work timer
+        self.running = true;
+        set_timeout(1.0);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -123,16 +127,43 @@ impl ZellijPlugin for Pomo {
         }
     }
 
-    fn pipe(&mut self, _pipe_message: PipeMessage) -> bool {
-        false
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        match pipe_message.name.as_str() {
+            "pomo" => {
+                if let Some(payload) = &pipe_message.payload {
+                    let parts: Vec<&str> = payload.trim().split_whitespace().collect();
+                    match parts.first().copied() {
+                        Some("start") => {
+                            if let Some(work) = parts.get(1).and_then(|s| s.parse().ok()) {
+                                self.work_duration = work;
+                            }
+                            if let Some(brk) = parts.get(2).and_then(|s| s.parse().ok()) {
+                                self.break_duration = brk;
+                            }
+                            self.phase = Phase::Work;
+                            self.seconds_remaining = self.work_duration;
+                            self.running = true;
+                            set_timeout(1.0);
+                        }
+                        Some("stop") => {
+                            self.running = false;
+                            self.phase = Phase::Finished;
+                        }
+                        _ => {}
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
         match self.phase {
-            Phase::Work => self.render_work(),
+            Phase::Work => self.render_work(cols),
             Phase::Break => self.render_break(rows, cols),
             Phase::BreakDone => self.render_break_done(rows, cols),
-            Phase::Finished => self.render_finished(),
+            Phase::Finished => self.render_finished(cols),
         }
     }
 }
@@ -171,19 +202,43 @@ impl Pomo {
 
     // -- rendering --
 
-    fn render_work(&self) {
+    fn render_work(&self, cols: usize) {
         let mins = self.seconds_remaining / 60;
         let secs = self.seconds_remaining % 60;
-        let status = if self.running { "running" } else { "paused" };
-        println!("WORK {mins:02}:{secs:02} [{status}]");
-        println!();
-        println!("SPACE: start/pause  r: reset");
+        let icon = if self.running { "🍅" } else { "⏸" };
+        let time = format!("{icon} {mins:02}:{secs:02}");
+        let help = "SPC:start/pause r:reset";
+        let padding = cols.saturating_sub(time.len() + help.len() + 1);
+        let line = format!("{time}{:>width$}", help, width = padding + help.len());
+        print_text_with_coordinates(
+            Text::new(&line).color_range(0, 0..time.len()),
+            0, 0, Some(cols), None,
+        );
+    }
+
+    fn render_finished(&self, cols: usize) {
+        let msg = "✅ Done!";
+        let help = "r:new session";
+        let padding = cols.saturating_sub(msg.len() + help.len() + 1);
+        let line = format!("{msg}{:>width$}", help, width = padding + help.len());
+        print_text_with_coordinates(Text::new(&line), 0, 0, Some(cols), None);
     }
 
     fn render_break(&self, rows: usize, cols: usize) {
-        let title = "BREAK TIME";
+        if rows < 3 || cols < 20 {
+            let mins = self.seconds_remaining / 60;
+            let secs = self.seconds_remaining % 60;
+            let line = format!("🍩 BREAK {mins:02}:{secs:02}");
+            print_text_with_coordinates(
+                Text::new(&line).color_range(0, 0..line.len()),
+                0, 0, Some(cols), None,
+            );
+            return;
+        }
+
+        let title = "🍩 BREAK TIME";
         let title_x = cols.saturating_sub(title.len()) / 2;
-        let title_y = rows / 2 - rows.min(8);
+        let title_y = (rows / 2).saturating_sub(6);
         print_text_with_coordinates(
             Text::new(title).color_range(0, 0..title.len()),
             title_x,
@@ -198,9 +253,18 @@ impl Pomo {
     }
 
     fn render_break_done(&self, rows: usize, cols: usize) {
-        let title = "BREAK OVER";
+        if rows < 3 || cols < 20 {
+            let line = "BREAK OVER  Another? [Y/n]";
+            print_text_with_coordinates(
+                Text::new(line).color_range(0, 0..line.len()),
+                0, 0, Some(cols), None,
+            );
+            return;
+        }
+
+        let title = "🍅 BREAK OVER";
         let title_x = cols.saturating_sub(title.len()) / 2;
-        let title_y = rows / 2 - 3;
+        let title_y = (rows / 2).saturating_sub(3);
         print_text_with_coordinates(
             Text::new(title).color_range(0, 0..title.len()),
             title_x,
@@ -214,7 +278,7 @@ impl Pomo {
         print_text_with_coordinates(
             Text::new(&bar).color_range(0, 0..bar_width),
             2,
-            rows / 2 - 1,
+            (rows / 2).saturating_sub(1),
             None,
             None,
         );
@@ -230,21 +294,14 @@ impl Pomo {
         );
     }
 
-    fn render_finished(&self) {
-        println!("All done! Nice work.");
-        println!();
-        println!("r: start new session");
-    }
-
     fn render_big_time(&self, rows: usize, cols: usize) {
         let mins = self.seconds_remaining / 60;
         let secs = self.seconds_remaining % 60;
         let digits = [mins / 10, mins % 10, 10, secs / 10, secs % 10];
 
-        // Each digit/colon is 3 chars wide, 1 space between each = 5*3 + 4 = 19
         let total_width = 19;
         let start_x = cols.saturating_sub(total_width) / 2;
-        let start_y = rows / 2 - 2;
+        let start_y = (rows / 2).saturating_sub(2);
 
         for row in 0..5 {
             let mut line = String::new();
