@@ -22,7 +22,6 @@ enum Phase {
     #[default]
     Work,
     Break,
-    BreakDone,
     Finished,
 }
 
@@ -33,8 +32,6 @@ struct Pomo {
     work_duration: usize,
     break_duration: usize,
     phase: Phase,
-    plugin_id: u32,
-    is_fullscreen: bool,
     spin_idx: usize,
 }
 
@@ -54,13 +51,15 @@ impl ZellijPlugin for Pomo {
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_BREAK_SECS);
         self.seconds_remaining = self.work_duration;
-        self.plugin_id = get_plugin_ids().plugin_id;
-
         subscribe(&[EventType::Timer, EventType::Key]);
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
         ]);
+
+        // Hide on load — pane size can't be controlled from the plugin,
+        // so we stay hidden during work and only show for break overlay.
+        hide_self();
 
         // Auto-start the work timer
         self.running = true;
@@ -77,7 +76,7 @@ impl ZellijPlugin for Pomo {
                         self.running = false;
                         match self.phase {
                             Phase::Work => self.start_break(),
-                            Phase::Break => self.phase = Phase::BreakDone,
+                            Phase::Break => self.start_work(),
                             _ => {}
                         }
                     } else {
@@ -99,19 +98,12 @@ impl ZellijPlugin for Pomo {
                             self.seconds_remaining = self.work_duration;
                             self.running = false;
                         }
+                        BareKey::Char('h') => {
+                            hide_self();
+                        }
                         _ => return false,
                     },
                     Phase::Break => return false,
-                    Phase::BreakDone => match key.bare_key {
-                        BareKey::Char('y') | BareKey::Char('Y') | BareKey::Enter => {
-                            self.start_work();
-                        }
-                        BareKey::Char('n') | BareKey::Char('N') => {
-                            self.phase = Phase::Finished;
-                            self.exit_fullscreen();
-                        }
-                        _ => return false,
-                    },
                     Phase::Finished => match key.bare_key {
                         BareKey::Char('r') => {
                             self.phase = Phase::Work;
@@ -168,7 +160,6 @@ impl ZellijPlugin for Pomo {
         match self.phase {
             Phase::Work => self.render_work(cols),
             Phase::Break => self.render_break(rows, cols),
-            Phase::BreakDone => self.render_break_done(rows, cols),
             Phase::Finished => self.render_finished(cols),
         }
     }
@@ -180,7 +171,7 @@ impl Pomo {
         self.seconds_remaining = self.break_duration;
         self.running = true;
         self.spin_idx = 0;
-        self.enter_fullscreen();
+        show_self(true);
         set_timeout(1.0);
     }
 
@@ -188,23 +179,10 @@ impl Pomo {
         self.phase = Phase::Work;
         self.seconds_remaining = self.work_duration;
         self.running = true;
-        self.exit_fullscreen();
+        hide_self();
         set_timeout(1.0);
     }
 
-    fn enter_fullscreen(&mut self) {
-        if !self.is_fullscreen {
-            toggle_pane_id_fullscreen(PaneId::Plugin(self.plugin_id));
-            self.is_fullscreen = true;
-        }
-    }
-
-    fn exit_fullscreen(&mut self) {
-        if self.is_fullscreen {
-            toggle_pane_id_fullscreen(PaneId::Plugin(self.plugin_id));
-            self.is_fullscreen = false;
-        }
-    }
 
     // -- rendering --
 
@@ -258,47 +236,6 @@ impl Pomo {
         self.render_spinner(rows, cols);
     }
 
-    fn render_break_done(&self, rows: usize, cols: usize) {
-        if rows < 3 || cols < 20 {
-            let line = "BREAK OVER  Another? [Y/n]";
-            print_text_with_coordinates(
-                Text::new(line).color_range(0, 0..line.len()),
-                0, 0, Some(cols), None,
-            );
-            return;
-        }
-
-        let title = "🍅 BREAK OVER";
-        let title_x = cols.saturating_sub(title.len()) / 2;
-        let title_y = (rows / 2).saturating_sub(3);
-        print_text_with_coordinates(
-            Text::new(title).color_range(0, 0..title.len()),
-            title_x,
-            title_y,
-            None,
-            None,
-        );
-
-        let bar_width = cols.saturating_sub(4);
-        let bar: String = (0..bar_width).map(|_| '━').collect();
-        print_text_with_coordinates(
-            Text::new(&bar).color_range(0, 0..bar_width),
-            2,
-            (rows / 2).saturating_sub(1),
-            None,
-            None,
-        );
-
-        let prompt = "Another? [Y/n]";
-        let prompt_x = cols.saturating_sub(prompt.len()) / 2;
-        print_text_with_coordinates(
-            Text::new(prompt).color_range(1, 0..prompt.len()),
-            prompt_x,
-            rows / 2 + 2,
-            None,
-            None,
-        );
-    }
 
     fn render_big_time(&self, rows: usize, cols: usize) {
         let mins = self.seconds_remaining / 60;
