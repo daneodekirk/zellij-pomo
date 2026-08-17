@@ -31,11 +31,11 @@ load_plugins {
 }
 ```
 
-Or use a local build:
+Alternatively, download `pomo.wasm` from the [releases page](https://github.com/daneodekirk/zellij-pomo/releases) — or build it yourself (see [Building](#building)) — and point Zellij at the file:
 
 ```kdl
 load_plugins {
-    "file:/path/to/pomo/target/wasm32-wasip1/release/pomo.wasm"
+    "file:/path/to/pomo.wasm"
 }
 ```
 
