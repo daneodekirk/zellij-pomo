@@ -33,6 +33,18 @@ struct Pomo {
     break_duration: usize,
     phase: Phase,
     spin_idx: usize,
+    timer_pending: bool,
+}
+
+impl Pomo {
+    // set_timeout chains stack: every call spawns another once-per-second
+    // chain that re-arms itself, making the countdown tick N times faster.
+    fn arm_timer(&mut self) {
+        if !self.timer_pending {
+            self.timer_pending = true;
+            set_timeout(1.0);
+        }
+    }
 }
 
 register_plugin!(Pomo);
@@ -51,24 +63,35 @@ impl ZellijPlugin for Pomo {
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_BREAK_SECS);
         self.seconds_remaining = self.work_duration;
-        subscribe(&[EventType::Timer, EventType::Key]);
+        subscribe(&[
+            EventType::Timer,
+            EventType::Key,
+            EventType::PermissionRequestResult,
+        ]);
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
         ]);
 
-        // Hide on load — pane size can't be controlled from the plugin,
-        // so we stay hidden during work and only show for break overlay.
-        hide_self();
-
-        // Auto-start the work timer
+        // Auto-start the work timer. Hiding waits for PermissionRequestResult —
+        // hide_self() fails silently before permissions are granted.
         self.running = true;
-        set_timeout(1.0);
+        self.arm_timer();
     }
 
     fn update(&mut self, event: Event) -> bool {
         match event {
+            Event::PermissionRequestResult(PermissionStatus::Granted) => {
+                // Now that hide_self() can succeed, stay hidden during work —
+                // pane size can't be controlled from the plugin, so we only
+                // show for the break overlay.
+                if self.phase == Phase::Work {
+                    hide_self();
+                }
+                true
+            }
             Event::Timer(_) => {
+                self.timer_pending = false;
                 if self.running && self.seconds_remaining > 0 {
                     self.seconds_remaining -= 1;
                     self.spin_idx = (self.spin_idx + 1) % SPINNER.len();
@@ -80,7 +103,7 @@ impl ZellijPlugin for Pomo {
                             _ => {}
                         }
                     } else {
-                        set_timeout(1.0);
+                        self.arm_timer();
                     }
                 }
                 true
@@ -91,7 +114,7 @@ impl ZellijPlugin for Pomo {
                         BareKey::Char(' ') => {
                             self.running = !self.running;
                             if self.running {
-                                set_timeout(1.0);
+                                self.arm_timer();
                             }
                         }
                         BareKey::Char('r') => {
@@ -120,6 +143,10 @@ impl ZellijPlugin for Pomo {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        // CLI pipes block the sending terminal until explicitly unblocked.
+        if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+            unblock_cli_pipe_input(pipe_id);
+        }
         match pipe_message.name.as_str() {
             "pomo" => {
                 if let Some(payload) = &pipe_message.payload {
@@ -135,7 +162,7 @@ impl ZellijPlugin for Pomo {
                             self.phase = Phase::Work;
                             self.seconds_remaining = self.work_duration;
                             self.running = true;
-                            set_timeout(1.0);
+                            self.arm_timer();
                         }
                         Some("stop") => {
                             self.running = false;
@@ -172,7 +199,7 @@ impl Pomo {
         self.running = true;
         self.spin_idx = 0;
         show_self(true);
-        set_timeout(1.0);
+        self.arm_timer();
     }
 
     fn start_work(&mut self) {
@@ -180,7 +207,7 @@ impl Pomo {
         self.seconds_remaining = self.work_duration;
         self.running = true;
         hide_self();
-        set_timeout(1.0);
+        self.arm_timer();
     }
 
 
