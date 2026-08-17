@@ -44,7 +44,8 @@ jobs:
 
       - name: Test
         # .cargo/config.toml defaults the target to wasm; tests run on the host
-        run: cargo test --lib --target "$(rustc -vV | sed -n 's/host: //p')"
+        run: |
+          cargo test --lib --target "$(rustc -vV | sed -n 's/host: //p')"
 
       - name: Build
         run: cargo build --release --target wasm32-wasip1
