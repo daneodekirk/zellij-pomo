@@ -1,6 +1,6 @@
 # pomo 🍅
 
-A minimal pomodoro timer plugin for [Zellij](https://zellij.dev). It stays out of your way while you work — the plugin pane hides itself during work sessions — and takes over the screen with a big countdown when it's time for a break.
+A minimal pomodoro timer plugin for [Zellij](https://zellij.dev). It stays out of your way while you work (the plugin pane hides itself during work sessions) and takes over the screen with a big countdown when it's time for a break.
 
 ![Break overlay with block-digit countdown](assets/pomo.png)
 
@@ -10,20 +10,9 @@ A minimal pomodoro timer plugin for [Zellij](https://zellij.dev). It stays out o
 - When the work timer ends, the pane reappears as a break overlay: a large block-digit countdown, progress bar, and spinner.
 - When the break ends, the pane hides again and the next work session starts on its own. The cycle repeats until you stop it.
 
-## Building
-
-Requires the Rust `wasm32-wasip1` target:
-
-```sh
-rustup target add wasm32-wasip1
-cargo build --target wasm32-wasip1
-```
-
-The plugin lands at `target/wasm32-wasip1/debug/pomo.wasm` (add `--release` for a release build).
-
 ## Installation
 
-Load it in the background from your Zellij config (`~/.config/zellij/config.kdl`) so it starts with every session. Point it straight at the latest GitHub release — no manual download or build needed:
+The classic 25 minutes of work / 5 minutes of break is the default, so all you need is to load the plugin and that's it. Add one line to your Zellij config (`~/.config/zellij/config.kdl`) and it starts with every session:
 
 ```kdl
 load_plugins {
@@ -31,7 +20,7 @@ load_plugins {
 }
 ```
 
-Alternatively, download `pomo.wasm` from the [releases page](https://github.com/daneodekirk/zellij-pomo/releases) — or build it yourself (see [Building](#building)) — and point Zellij at the file:
+Alternatively, download `pomo.wasm` from the [releases page](https://github.com/daneodekirk/zellij-pomo/releases), or build it yourself (see [Building](#building)), and point Zellij at the file:
 
 ```kdl
 load_plugins {
@@ -42,10 +31,21 @@ load_plugins {
 Or launch it manually in a pane:
 
 ```sh
-zellij plugin -- file:/path/to/pomo/target/wasm32-wasip1/debug/pomo.wasm
+zellij plugin -- file:/path/to/pomo.wasm
 ```
 
 The plugin asks for the `ReadApplicationState`, `ChangeApplicationState`, and `ReadCliPipes` permissions on first load (needed to hide/show its own pane and to respond to `zellij pipe` commands without blocking the sending terminal).
+
+## Building
+
+Requires the Rust `wasm32-wasip1` target:
+
+```sh
+rustup target add wasm32-wasip1
+cargo build --release --target wasm32-wasip1
+```
+
+The plugin lands at `target/wasm32-wasip1/release/pomo.wasm`.
 
 ## Configuration
 
@@ -74,7 +74,7 @@ Keys apply when the plugin pane is focused:
 | `h` | work | Hide the pane |
 | `r` | finished | Start a new session (paused) |
 
-Breaks are intentionally uninterruptible — no keys are handled during a break.
+Breaks are intentionally uninterruptible: no keys are handled during a break.
 
 ## Pipe commands
 
@@ -95,4 +95,4 @@ zellij pipe --name pomo -- "show"
 
 ## Compact mode
 
-When the pane is small (fewer than 3 rows or 20 columns), the break screen falls back to a single-line `🍩 BREAK 04:59` display, and the work screen is always a single row (`🍅 24:59`) — so the plugin works fine docked in a tiny pane as well as fullscreen.
+When the pane is small (fewer than 3 rows or 20 columns), the break screen falls back to a single-line `🍩 BREAK 04:59` display, and the work screen is always a single row (`🍅 24:59`), so the plugin works fine docked in a tiny pane as well as fullscreen.

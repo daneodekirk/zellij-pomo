@@ -34,6 +34,14 @@ struct Pomo {
     phase: Phase,
     spin_idx: usize,
     timer_pending: bool,
+    deadline: f64,
+}
+
+fn now_secs() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 impl Pomo {
@@ -44,6 +52,15 @@ impl Pomo {
             self.timer_pending = true;
             set_timeout(1.0);
         }
+    }
+
+    // Countdown is anchored to a wall-clock deadline rather than counting
+    // Timer events, so duplicate or missed events can't change the pace.
+    fn begin(&mut self, secs: usize) {
+        self.seconds_remaining = secs;
+        self.deadline = now_secs() + secs as f64;
+        self.running = true;
+        self.arm_timer();
     }
 }
 
@@ -76,8 +93,7 @@ impl ZellijPlugin for Pomo {
 
         // Auto-start the work timer. Hiding waits for PermissionRequestResult —
         // hide_self() fails silently before permissions are granted.
-        self.running = true;
-        self.arm_timer();
+        self.begin(self.work_duration);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -93,9 +109,10 @@ impl ZellijPlugin for Pomo {
             }
             Event::Timer(_) => {
                 self.timer_pending = false;
-                if self.running && self.seconds_remaining > 0 {
-                    self.seconds_remaining -= 1;
+                if self.running {
                     self.spin_idx = (self.spin_idx + 1) % SPINNER.len();
+                    self.seconds_remaining =
+                        (self.deadline - now_secs()).ceil().max(0.0) as usize;
                     if self.seconds_remaining == 0 {
                         self.running = false;
                         match self.phase {
@@ -113,9 +130,11 @@ impl ZellijPlugin for Pomo {
                 match self.phase {
                     Phase::Work => match key.bare_key {
                         BareKey::Char(' ') => {
-                            self.running = !self.running;
                             if self.running {
-                                self.arm_timer();
+                                self.running = false;
+                            } else {
+                                // Re-anchor the deadline to the paused remainder
+                                self.begin(self.seconds_remaining);
                             }
                         }
                         BareKey::Char('r') => {
@@ -161,9 +180,7 @@ impl ZellijPlugin for Pomo {
                                 self.break_duration = brk;
                             }
                             self.phase = Phase::Work;
-                            self.seconds_remaining = self.work_duration;
-                            self.running = true;
-                            self.arm_timer();
+                            self.begin(self.work_duration);
                         }
                         Some("stop") => {
                             self.running = false;
@@ -196,19 +213,15 @@ impl ZellijPlugin for Pomo {
 impl Pomo {
     fn start_break(&mut self) {
         self.phase = Phase::Break;
-        self.seconds_remaining = self.break_duration;
-        self.running = true;
         self.spin_idx = 0;
         show_self(true);
-        self.arm_timer();
+        self.begin(self.break_duration);
     }
 
     fn start_work(&mut self) {
         self.phase = Phase::Work;
-        self.seconds_remaining = self.work_duration;
-        self.running = true;
         hide_self();
-        self.arm_timer();
+        self.begin(self.work_duration);
     }
 
 
