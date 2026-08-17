@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump level"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          latest=${latest:-v0.0.0}
+          IFS=. read -r major minor patch <<<"${latest#v}"
+          case "${{ inputs.bump || 'patch' }}" in
+            major) tag="v$((major+1)).0.0" ;;
+            minor) tag="v${major}.$((minor+1)).0" ;;
+            *)     tag="v${major}.${minor}.$((patch+1))" ;;
+          esac
+          echo "Releasing $tag (previous: $latest)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        run: rustup update stable && rustup target add wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --target wasm32-wasip1
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            target/wasm32-wasip1/release/pomo.wasm
