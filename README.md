@@ -23,11 +23,19 @@ The plugin lands at `target/wasm32-wasip1/debug/pomo.wasm` (add `--release` for 
 
 ## Installation
 
-Load it in the background from your Zellij config (`~/.config/zellij/config.kdl`) so it starts with every session:
+Load it in the background from your Zellij config (`~/.config/zellij/config.kdl`) so it starts with every session. Point it straight at the latest GitHub release — no manual download or build needed:
 
 ```kdl
 load_plugins {
-    "file:/path/to/pomo/target/wasm32-wasip1/debug/pomo.wasm"
+    "https://github.com/daneodekirk/zellij-pomo/releases/latest/download/pomo.wasm"
+}
+```
+
+Or use a local build:
+
+```kdl
+load_plugins {
+    "file:/path/to/pomo/target/wasm32-wasip1/release/pomo.wasm"
 }
 ```
 
