@@ -71,6 +71,7 @@ impl ZellijPlugin for Pomo {
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
+            PermissionType::ReadCliPipes,
         ]);
 
         // Auto-start the work timer. Hiding waits for PermissionRequestResult —

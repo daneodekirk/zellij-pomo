@@ -45,7 +45,7 @@ Or launch it manually in a pane:
 zellij plugin -- file:/path/to/pomo/target/wasm32-wasip1/debug/pomo.wasm
 ```
 
-The plugin asks for the `ReadApplicationState` and `ChangeApplicationState` permissions on first load (needed to hide/show its own pane).
+The plugin asks for the `ReadApplicationState`, `ChangeApplicationState`, and `ReadCliPipes` permissions on first load (needed to hide/show its own pane and to respond to `zellij pipe` commands without blocking the sending terminal).
 
 ## Configuration
 
