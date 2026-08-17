@@ -1,3 +1,4 @@
+use pomo::{Countdown, Phase, PipeCommand};
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
@@ -17,24 +18,14 @@ const DIGIT_PATTERNS: [[&str; 5]; 11] = [
 
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-#[derive(Default, PartialEq)]
-enum Phase {
-    #[default]
-    Work,
-    Break,
-    Finished,
-}
-
 #[derive(Default)]
 struct Pomo {
-    seconds_remaining: usize,
-    running: bool,
+    countdown: Countdown,
     work_duration: usize,
     break_duration: usize,
     phase: Phase,
     spin_idx: usize,
     timer_pending: bool,
-    deadline: f64,
 }
 
 fn now_secs() -> f64 {
@@ -54,12 +45,8 @@ impl Pomo {
         }
     }
 
-    // Countdown is anchored to a wall-clock deadline rather than counting
-    // Timer events, so duplicate or missed events can't change the pace.
     fn begin(&mut self, secs: usize) {
-        self.seconds_remaining = secs;
-        self.deadline = now_secs() + secs as f64;
-        self.running = true;
+        self.countdown.begin(secs, now_secs());
         self.arm_timer();
     }
 }
@@ -79,7 +66,6 @@ impl ZellijPlugin for Pomo {
             .get("break_seconds")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_BREAK_SECS);
-        self.seconds_remaining = self.work_duration;
         subscribe(&[
             EventType::Timer,
             EventType::Key,
@@ -109,12 +95,9 @@ impl ZellijPlugin for Pomo {
             }
             Event::Timer(_) => {
                 self.timer_pending = false;
-                if self.running {
+                if self.countdown.running {
                     self.spin_idx = (self.spin_idx + 1) % SPINNER.len();
-                    self.seconds_remaining =
-                        (self.deadline - now_secs()).ceil().max(0.0) as usize;
-                    if self.seconds_remaining == 0 {
-                        self.running = false;
+                    if self.countdown.tick(now_secs()) {
                         match self.phase {
                             Phase::Work => self.start_break(),
                             Phase::Break => self.start_work(),
@@ -130,16 +113,16 @@ impl ZellijPlugin for Pomo {
                 match self.phase {
                     Phase::Work => match key.bare_key {
                         BareKey::Char(' ') => {
-                            if self.running {
-                                self.running = false;
+                            if self.countdown.running {
+                                self.countdown.pause();
                             } else {
                                 // Re-anchor the deadline to the paused remainder
-                                self.begin(self.seconds_remaining);
+                                self.begin(self.countdown.seconds_remaining);
                             }
                         }
                         BareKey::Char('r') => {
-                            self.seconds_remaining = self.work_duration;
-                            self.running = false;
+                            self.countdown.pause();
+                            self.countdown.seconds_remaining = self.work_duration;
                         }
                         BareKey::Char('h') => {
                             hide_self();
@@ -150,8 +133,8 @@ impl ZellijPlugin for Pomo {
                     Phase::Finished => match key.bare_key {
                         BareKey::Char('r') => {
                             self.phase = Phase::Work;
-                            self.seconds_remaining = self.work_duration;
-                            self.running = false;
+                            self.countdown.pause();
+                            self.countdown.seconds_remaining = self.work_duration;
                         }
                         _ => return false,
                     },
@@ -170,29 +153,28 @@ impl ZellijPlugin for Pomo {
         match pipe_message.name.as_str() {
             "pomo" => {
                 if let Some(payload) = &pipe_message.payload {
-                    let parts: Vec<&str> = payload.trim().split_whitespace().collect();
-                    match parts.first().copied() {
-                        Some("start") => {
-                            if let Some(work) = parts.get(1).and_then(|s| s.parse().ok()) {
+                    match PipeCommand::parse(payload) {
+                        Some(PipeCommand::Start { work, brk }) => {
+                            if let Some(work) = work {
                                 self.work_duration = work;
                             }
-                            if let Some(brk) = parts.get(2).and_then(|s| s.parse().ok()) {
+                            if let Some(brk) = brk {
                                 self.break_duration = brk;
                             }
                             self.phase = Phase::Work;
                             self.begin(self.work_duration);
                         }
-                        Some("stop") => {
-                            self.running = false;
+                        Some(PipeCommand::Stop) => {
+                            self.countdown.pause();
                             self.phase = Phase::Finished;
                         }
-                        Some("hide") => {
+                        Some(PipeCommand::Hide) => {
                             hide_self();
                         }
-                        Some("show") => {
+                        Some(PipeCommand::Show) => {
                             show_self(false);
                         }
-                        _ => {}
+                        None => {}
                     }
                 }
                 true
@@ -228,9 +210,9 @@ impl Pomo {
     // -- rendering --
 
     fn render_work(&self, cols: usize) {
-        let mins = self.seconds_remaining / 60;
-        let secs = self.seconds_remaining % 60;
-        let icon = if self.running { "🍅" } else { "⏸" };
+        let mins = self.countdown.seconds_remaining / 60;
+        let secs = self.countdown.seconds_remaining % 60;
+        let icon = if self.countdown.running { "🍅" } else { "⏸" };
         let time = format!("{icon} {mins:02}:{secs:02}");
         let help = "SPC:start/pause r:reset";
         let padding = cols.saturating_sub(time.len() + help.len() + 1);
@@ -251,8 +233,8 @@ impl Pomo {
 
     fn render_break(&self, rows: usize, cols: usize) {
         if rows < 3 || cols < 20 {
-            let mins = self.seconds_remaining / 60;
-            let secs = self.seconds_remaining % 60;
+            let mins = self.countdown.seconds_remaining / 60;
+            let secs = self.countdown.seconds_remaining % 60;
             let line = format!("🍩 BREAK {mins:02}:{secs:02}");
             print_text_with_coordinates(
                 Text::new(&line).color_range(0, 0..line.len()),
@@ -279,8 +261,8 @@ impl Pomo {
 
 
     fn render_big_time(&self, rows: usize, cols: usize) {
-        let mins = self.seconds_remaining / 60;
-        let secs = self.seconds_remaining % 60;
+        let mins = self.countdown.seconds_remaining / 60;
+        let secs = self.countdown.seconds_remaining % 60;
         let digits = [mins / 10, mins % 10, 10, secs / 10, secs % 10];
 
         let total_width = 19;
@@ -309,7 +291,7 @@ impl Pomo {
     }
 
     fn render_progress_bar(&self, total: usize, rows: usize, cols: usize) {
-        let elapsed = total.saturating_sub(self.seconds_remaining);
+        let elapsed = total.saturating_sub(self.countdown.seconds_remaining);
         let bar_width = cols.saturating_sub(4);
         let filled = if total > 0 {
             ((elapsed as f64 / total as f64) * bar_width as f64).round() as usize
