@@ -26,6 +26,9 @@ struct Pomo {
     phase: Phase,
     spin_idx: usize,
     timer_pending: bool,
+    plugin_id: u32,
+    // A short-lived copy opened in the user's tab to show one break.
+    is_break_screen: bool,
 }
 
 fn now_secs() -> f64 {
@@ -66,6 +69,8 @@ impl ZellijPlugin for Pomo {
             .get("break_seconds")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_BREAK_SECS);
+        self.plugin_id = get_plugin_ids().plugin_id;
+        self.is_break_screen = configuration.get("mode").map(String::as_str) == Some("break");
         subscribe(&[
             EventType::Timer,
             EventType::Key,
@@ -75,7 +80,14 @@ impl ZellijPlugin for Pomo {
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::ReadCliPipes,
+            PermissionType::OpenTerminalsOrPlugins,
         ]);
+
+        if self.is_break_screen {
+            self.phase = Phase::Break;
+            self.begin(self.break_duration);
+            return;
+        }
 
         // Auto-start the work timer. Hiding waits for PermissionRequestResult —
         // hide_self() fails silently before permissions are granted.
@@ -98,6 +110,10 @@ impl ZellijPlugin for Pomo {
                 if self.countdown.running {
                     self.spin_idx = (self.spin_idx + 1) % SPINNER.len();
                     if self.countdown.tick(now_secs()) {
+                        if self.is_break_screen {
+                            close_self();
+                            return false;
+                        }
                         match self.phase {
                             Phase::Work => self.start_break(),
                             Phase::Break => self.start_work(),
@@ -151,6 +167,15 @@ impl ZellijPlugin for Pomo {
             unblock_cli_pipe_input(pipe_id);
         }
         match pipe_message.name.as_str() {
+            "pomo" if self.is_break_screen => {
+                // The main copy owns the timer; a new start or a stop ends this break.
+                if let Some(Some(PipeCommand::Start { .. } | PipeCommand::Stop)) =
+                    pipe_message.payload.as_deref().map(PipeCommand::parse)
+                {
+                    close_self();
+                }
+                false
+            }
             "pomo" => {
                 if let Some(payload) = &pipe_message.payload {
                     match PipeCommand::parse(payload) {
@@ -196,8 +221,23 @@ impl Pomo {
     fn start_break(&mut self) {
         self.phase = Phase::Break;
         self.spin_idx = 0;
-        show_self(true);
         self.begin(self.break_duration);
+        self.open_break_screen();
+    }
+
+    // Showing our own pane jumps to the tab it lives in, and Zellij 0.45
+    // can't reliably move it, so open a fresh copy in the user's tab instead.
+    fn open_break_screen(&self) {
+        match get_pane_info(PaneId::Plugin(self.plugin_id)).and_then(|p| p.plugin_url) {
+            Some(url) => {
+                let config = BTreeMap::from([
+                    ("mode".to_string(), "break".to_string()),
+                    ("break_seconds".to_string(), self.break_duration.to_string()),
+                ]);
+                open_plugin_pane_floating(&url, config, None, BTreeMap::new());
+            }
+            None => show_self(true),
+        }
     }
 
     fn start_work(&mut self) {

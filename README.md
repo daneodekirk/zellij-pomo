@@ -34,7 +34,7 @@ Or launch it manually in a pane:
 zellij plugin -- file:/path/to/pomo.wasm
 ```
 
-The plugin asks for the `ReadApplicationState`, `ChangeApplicationState`, and `ReadCliPipes` permissions on first load (needed to hide/show its own pane and to respond to `zellij pipe` commands without blocking the sending terminal).
+The plugin asks for the `ReadApplicationState`, `ChangeApplicationState`, `ReadCliPipes`, and `OpenTerminalsOrPlugins` permissions on first load (needed to hide/show its own pane, to open the break screen in the tab you are on, and to respond to `zellij pipe` commands without blocking the sending terminal).
 
 ## Building
 
